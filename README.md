@@ -29,8 +29,8 @@ The built-in Titanic dataset in R contains survival information for **2,201 pass
 
 ## Files Included
 
-- `Titanic_Survival_Analysis_Report_ML_final.Rmd` – R Markdown source file
-- `Titanic_Survival_Analysis_Report_ML_final.pdf` – Final PDF report
+- `Titanic_Survival_Analysis_Nithi_Santhosh_25012401.Rmd` – R Markdown source file
+- `Titanic_Survival_Analysis_Nithi_Santhosh_25012401.pdf` – Final PDF report
 
 ## Tools and Packages Used
 
