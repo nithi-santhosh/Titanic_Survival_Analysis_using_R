@@ -1,0 +1,626 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document
+header-includes:
+  - \usepackage[dvipsnames]{xcolor}
+---
+
+\begin{center}
+
+{\Huge \textbf{\textcolor{NavyBlue}{Who Survived the Titanic?}}}
+
+\vspace{0.4cm}
+
+{\large \textit{An Exploratory Analysis of Survival Patterns During the 1912 Maritime Disaster}}
+
+\vspace{0.4cm}
+\hrule
+\vspace{0.6cm}
+
+{\small \textbf{Course Project: R for Data Science}}
+
+\vspace{0.8cm}
+
+Nithi Santhosh
+
+\vspace{0.1cm}
+
+IIM Bangalore – PGPBA – 25012401
+
+\vspace{0.5cm}
+
+02 June 2026
+
+\end{center}
+
+
+```{r, include=FALSE}
+# install "tinytex" package if not already installed
+if (!requireNamespace("tinytex", quietly = TRUE)) {
+  install.packages("tinytex", quiet = TRUE)
+  suppressMessages(suppressWarnings(tinytex::install_tinytex()))
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, # shows code
+  warning = FALSE, # hides warnings
+  message = FALSE # hides messages
+)
+```
+
+```{r packages, include=FALSE}
+# load all required packages
+library(tidyverse)
+library(knitr)
+library(broom)
+```
+
+# Executive Summary
+
+This report explores the built-in `Titanic` dataset from the R `datasets` package. The dataset captures survival outcomes from the Titanic disaster in a compact contingency table format representing `2,201` passengers and crew members.
+
+`The central question is simple:`
+
+**Who was more likely to survive the Titanic disaster, and which passenger characteristics mattered most?**
+
+The analysis shows how survival varied by passenger class, sex, and age. It also uses chi-square tests and logistic regression on the aggregated passenger counts to quantify the relationship between survival and passenger profile.
+
+To extend the analysis beyond descriptive statistics, a Logistic Regression Machine Learning model was developed to predict passenger survival using passenger class, sex, and age category as predictor variables. The model was evaluated using a train-test split approach, confusion matrix, accuracy metrics, sensitivity, and specificity measures. Results indicate that survival outcomes can be predicted with meaningful accuracy, highlighting the importance of demographic and social factors during the disaster.
+
+Overall, the findings demonstrate that survival aboard the Titanic was not random. Instead, it was strongly influenced by passenger characteristics, and the machine learning model further confirms the predictive power of these factors in explaining survival outcomes.
+
+# 1. Introduction
+
+The sinking of the Titanic in 1912 remains one of the most well-known maritime disasters in history. Beyond the historical tragedy, the event offers a powerful data story: even in a life or death setting, passenger characteristics such as class, sex, and age influenced survival chances.
+
+# 2. Dataset Overview
+
+The Titanic dataset comprises survival outcomes and demographic characteristics for 2,201 passengers and crew members aboard the Titanic. It includes information on passenger class, sex, age group, and survival status, summarized in an aggregated contingency table.
+
+```{r dataset}
+# load the Titanic dataset, store it to Titanic_df as dataframe and display the first 6 
+# rows
+data(Titanic)
+Titanic_df <- as.data.frame(Titanic)
+head(Titanic_df)
+```
+
+```{r structure_summary}
+# examine the structure of the Titanic dataset
+str(Titanic_df)
+# generate summary statistics
+summary(Titanic_df)
+```
+
+```{r variable-description, echo=FALSE}
+# Create a table describing the Titanic dataset variables
+
+variable_description <- data.frame(
+  Variable = c("Class", "Sex", "Age", "Survived", "Freq"),
+  Meaning = c(
+    "Passenger class: 1st, 2nd, 3rd, or Crew",
+    "Male or Female",
+    "Child or Adult",
+    "Whether the passenger survived",
+    "Number of passengers in that category"
+  )
+)
+
+knitr::kable(
+  variable_description,
+  caption = "Variables and their Meaning"
+)
+```
+
+# 3. Data Wrangling
+
+To prepare the dataset for analysis, data wrangling techniques such as `mutate`, `group_by`, `summarise`, and `ungroup` were used to create meaningful summaries of passenger survival patterns across different demographic groups.
+
+```{r wrangling}
+# create a descriptive survival status variable for easier interpretation and reporting
+Titanic_long <- Titanic_df %>%
+  mutate(
+    survival_status = if_else(Survived == "Yes", "Survived", "Did not survive")
+  )
+
+# summarize the total number of survivors and non-survivors in the Titanic dataset
+overall_summary <- Titanic_long %>%
+  group_by(Survived) %>%
+  summarise(total_passengers = sum(Freq), .groups = "drop")
+
+# summarize survival counts and survival share within each passenger class
+class_summary <- Titanic_long %>%
+  group_by(Class, Survived) %>%
+  summarise(total_passengers = sum(Freq), .groups = "drop") %>%
+  group_by(Class) %>%
+  mutate(class_share = total_passengers / sum(total_passengers)) %>%
+  ungroup()
+
+# summarize passenger survival by sex and compute the survival proportion within each sex 
+# group
+sex_summary <- Titanic_long %>%
+  group_by(Sex, Survived) %>%
+  summarise(total_passengers = sum(Freq), .groups = "drop") %>%
+  group_by(Sex) %>%
+  mutate(sex_share = total_passengers / sum(total_passengers)) %>%
+  ungroup()
+
+# summarize passenger survival by age group and compute the survival proportion within 
+# each age category
+age_summary <- Titanic_long %>%
+  group_by(Age, Survived) %>%
+  summarise(total_passengers = sum(Freq), .groups = "drop") %>%
+  group_by(Age) %>%
+  mutate(age_share = total_passengers / sum(total_passengers)) %>%
+  ungroup()
+```
+
+```{r overall_table}
+# display a formatted table showing the overall number of survivors and non-survivors
+kable(overall_summary, caption = "Overall survival counts in the Titanic dataset")
+```
+
+**Inference:** Out of 2,201 passengers and crew members, 711 survived while 1,490 did not survive. This indicates that the majority of individuals aboard the Titanic did not survive the disaster.
+
+```{r class_based_survival_table}
+# display a formatted table showing the class based number of survivors and non-survivors
+kable(class_summary, caption = "Class based survival counts in the Titanic dataset")
+```
+
+**Inference:** Survival rates varied considerably across passenger classes. First-class passengers had the highest proportion of survivors, while third-class passengers experienced the lowest survival rates.
+
+# 4. Exploratory Data Analysis
+
+## 4.1 Survival Rate by Passenger Class
+
+Passenger class is the most intuitive signal in the dataset. First-class passengers were closer to the upper decks, had better accommodations, and generally occupied a more privileged position on the ship. Third-class passengers were often deeper in the ship, where evacuation could be more difficult.
+
+```{r class_plot}
+# create a stacked bar chart to compare survival rates across different passenger classes
+class_plot <- class_summary %>%
+  ggplot(aes(x = Class,
+             y = class_share,
+             fill = Survived)) +
+  geom_col() +
+  scale_fill_manual(
+    values = c(
+      "No" = "firebrick3",
+      "Yes" = "steelblue3"
+    )
+  ) +
+  labs(
+    title = "Survival Rate by Passenger Class",
+    x = "Passenger Class",
+    y = "Survival Percentage",
+    fill = "Survived"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+
+class_plot
+```
+
+**Inference:**  
+The survival rate varied considerably across passenger classes. First-class passengers had the highest survival proportion, while third-class passengers had the lowest. This suggests that social status, cabin location, and access to evacuation resources played an important role in determining survival outcomes during the disaster.
+
+## 4.2 Survival Rate by Sex
+
+The Titanic evacuation is famously associated with the phrase "women and children first." This makes sex one of the most important variables in the report.
+
+```{r sex_plot}
+# create side-by-side pie charts to compare survival proportions between male and female
+# passengers
+par(mfrow = c(1,2), oma = c(0,0,3,0))
+
+for(g in c("Male","Female")) {
+
+  temp <- sex_summary %>%
+    filter(Sex == g)
+
+  pie(
+    temp$total_passengers,
+    labels = paste0(
+      temp$Survived,
+      "\n",
+      round(temp$sex_share * 100,1),
+      "%"
+    ),
+    col = c("firebrick3","steelblue3"),
+    main = paste(g, "Passengers")
+  )
+}
+
+mtext(
+  "Survival Rate by Sex",
+  outer = TRUE,
+  cex = 1.5,
+  font = 2
+)
+
+par(mfrow = c(1,1))
+```
+
+**Inference:**  
+Female passengers had a significantly higher survival rate than male passengers. This finding supports the historical “women and children first” evacuation policy and indicates that gender was one of the strongest factors influencing survival during the Titanic disaster.
+
+## 4.3 Survival Rate by Age
+
+Age separates children from adults. In a disaster story, this matters because children were often prioritized during evacuation.
+
+```{r age_plot}
+# create a dot plot to compare survival rates between children and adults
+age_plot <- age_summary %>%
+  filter(Survived == "Yes") %>%
+  ggplot(
+    aes(
+      x = Age,
+      y = age_share,
+      color = Age
+    )
+  ) +
+  geom_line(
+    aes(group = 1),
+    color = "gray50",
+    linewidth = 1
+  ) +
+  geom_point(size = 6) +
+  scale_color_manual(
+    values = c(
+      "Child" = "steelblue3",
+      "Adult" = "firebrick3"
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::percent
+  ) +
+  labs(
+    title = "Survival Rate by Age",
+    x = "Age Group",
+    y = "Survival Percentage"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold")
+  )
+
+age_plot
+```
+
+**Inference:**  
+Children had a higher survival proportion than adults, suggesting that age played an important role in survival outcomes and evacuation decisions during the Titanic disaster.
+
+## 4.4 Survival Heatmap by Class and Sex
+
+A heatmap is useful for seeing where the strongest survival concentration lies.
+
+```{r heatmap}
+# visualize the combined effect of passenger class and sex on survival outcomes using a
+# heatmap
+heat_df <- Titanic_long %>%
+  group_by(Class, Sex, Survived) %>%
+  summarise(Freq = sum(Freq), .groups = "drop") %>%
+  group_by(Class, Sex) %>%
+  mutate(share = Freq / sum(Freq)) %>%
+  ungroup() %>%
+  filter(Survived == "Yes")
+
+ggplot(heat_df, aes(x = Sex, y = Class, fill = share)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(
+    low = "firebrick3",
+    high = "steelblue3"
+  ) +
+  labs(
+    title = "Survival Heatmap by Class and Sex",
+    x = "Sex",
+    y = "Passenger Class",
+    fill = "Survival\nShare"
+  ) +
+  theme_minimal()
+```
+
+**Inference:**  
+The heatmap highlights a strong interaction between passenger class and gender. Female passengers, especially those in higher classes, had the highest survival rates, whereas lower-class male passengers had the lowest chances of survival.
+
+# 5. Hypothesis Testing and Chi-Square Analysis
+
+## 5.1 Hypothesis: Is survival independent of sex?
+
+### Null hypothesis
+Survival and sex are independent.
+
+### Alternative hypothesis
+Survival and sex are associated.
+
+```{r chisq_sex}
+# perform a chi-square test to examine whether survival is associated with passenger sex
+sex_table <- xtabs(Freq ~ Sex + Survived, data = Titanic_df)
+chisq.test(sex_table)
+```
+
+## 5.2 Hypothesis: Is survival independent of passenger class?
+
+### Null hypothesis
+Survival and passenger class are independent.
+
+### Alternative hypothesis
+Survival and passenger class are associated.
+
+```{r chisq_class}
+# perform a chi-square test to examine whether survival is associated with passenger class
+class_table <- xtabs(Freq ~ Class + Survived, data = Titanic_df)
+chisq.test(class_table)
+```
+
+## 5.3 Hypothesis: Is survival independent of age group?
+
+### Null hypothesis
+Survival and age group are independent.
+
+### Alternative hypothesis
+Survival and age group are associated.
+
+```{r chisq_age}
+# perform a chi-square test to examine whether survival is associated with age group
+age_table <- xtabs(Freq ~ Age + Survived, data = Titanic_df)
+chisq.test(age_table)
+```
+
+**Inference:**  
+The chi-square tests confirm that passenger sex, class, and age had a significant influence on survival. The very low p-values indicate a strong association between these characteristics and survival outcomes.
+
+# 6. Statistical Modeling: Logistic Regression Analysis
+
+Because survival is a yes/no outcome, logistic regression is a natural model.
+
+We first reshape the aggregated table so that each row contains the number of survivors and non-survivors in that combination of class, sex, and age.
+
+```{r glm_data}
+# convert aggregated survival counts into a wide format for logistic regression modeling
+glm_df <- Titanic_df %>%
+  select(Class, Sex, Age, Survived, Freq) %>%
+  pivot_wider(names_from = Survived, values_from = Freq) %>%
+  mutate(
+    Yes = replace_na(Yes, 0),
+    No = replace_na(No, 0)
+  )
+
+head(glm_df)
+```
+
+```{r glm_model}
+# fit a logistic regression model to evaluate how class, sex, and age influence survival
+# odds
+survival_model <- glm(
+  cbind(Yes, No) ~ Class + Sex + Age,
+  family = binomial,
+  data = glm_df
+)
+
+summary(survival_model)
+```
+
+```{r glm_stargazer, echo=FALSE}
+# generate a formatted summary table of the logistic regression model results
+if (!requireNamespace("stargazer", quietly = TRUE)) {
+  install.packages("stargazer", quiet = TRUE)
+}
+suppressPackageStartupMessages(library(stargazer))
+stargazer(survival_model, type = "text", omit = "Constant")
+```
+
+### Inference
+
+The logistic regression model confirms that passenger class, sex, and age significantly influenced survival outcomes. Female passengers and children had higher survival odds, while passengers in lower classes were less likely to survive than first-class passengers.
+
+# 7. Machine Learning: Predicting Passenger Survival
+
+## 7.1 Data Preparation
+
+To build a predictive model, the aggregated Titanic table is expanded into passenger-level observations using the frequency column.
+
+```{r ml_data}
+library(caret)
+
+# convert aggregated passenger counts into individual observations for survival
+# prediction modeling
+Titanic_expanded <- Titanic_df[rep(1:nrow(Titanic_df), Titanic_df$Freq), ]
+
+Titanic_expanded$Survived <- factor(
+  Titanic_expanded$Survived,
+  levels = c("No","Yes")
+)
+```
+
+## 7.2 Train-Test Split
+
+```{r split}
+# create an 80:20 train-test split to assess the predictive performance of the survival
+# model
+set.seed(123)
+
+train_index <- createDataPartition(
+  Titanic_expanded$Survived,
+  p = 0.80,
+  list = FALSE
+)
+
+train_data <- Titanic_expanded[train_index, ]
+test_data  <- Titanic_expanded[-train_index, ]
+```
+
+## 7.3 Logistic Regression Model
+
+### Hypothesis
+
+Passenger survival can be predicted using passenger class, gender, and age category.
+
+```{r logistic_model}
+# train a logistic regression model to predict passenger survival using class, sex,
+# and age
+titanic_model <- glm(
+  Survived ~ Class + Sex + Age,
+  data = train_data,
+  family = binomial
+)
+
+summary(titanic_model)
+```
+
+## 7.4 Model Evaluation
+
+```{r prediction}
+# predict passenger survival on the test data and assess classification accuracy
+# using a confusion matrix
+pred_prob <- predict(
+  titanic_model,
+  newdata = test_data,
+  type = "response"
+)
+
+pred_class <- ifelse(pred_prob > 0.5, "Yes", "No")
+pred_class <- factor(pred_class, levels = c("No","Yes"))
+
+cm <- confusionMatrix(
+  pred_class,
+  test_data$Survived
+)
+
+cm
+```
+
+### Interpretation
+
+The confusion matrix measures how accurately the model predicts survival outcomes. Accuracy indicates the percentage of passengers correctly classified, while sensitivity and specificity evaluate the model's ability to identify survivors and non-survivors respectively.
+
+## 7.5 Model Performance Metrics
+
+The predictive performance of the Logistic Regression model is evaluated using standard classification metrics including Accuracy, Sensitivity, Specificity, and Cohen's Kappa. These metrics provide a comprehensive assessment of how well the model identifies survivors and non-survivors.
+
+```{r performance_metrics}
+# extract and report accuracy, sensitivity, specificity, and kappa statistics for model
+# evaluation
+accuracy  <- cm$overall["Accuracy"]
+kappa     <- cm$overall["Kappa"]
+
+sensitivity <- cm$byClass["Sensitivity"]
+specificity <- cm$byClass["Specificity"]
+
+cat("Model Performance Metrics\n")
+cat("Accuracy    :", round(accuracy, 4), "\n")
+cat("Sensitivity :", round(sensitivity, 4), "\n")
+cat("Specificity :", round(specificity, 4), "\n")
+cat("Kappa       :", round(kappa, 4), "\n")
+```
+
+### Interpretation
+
+**Accuracy** measures the proportion of passengers correctly classified by the model.
+
+**Sensitivity** measures the model's ability to correctly identify passengers who survived the disaster.
+
+**Specificity** measures the model's ability to correctly identify passengers who did not survive.
+
+**Kappa Statistic** evaluates agreement beyond random chance and provides a more robust measure of model performance.
+
+### Inference
+
+The Logistic Regression model demonstrates strong predictive capability by accurately classifying passenger survival outcomes using only passenger class, gender, and age group information. High sensitivity indicates that the model effectively identifies survivors, while high specificity shows that non-survivors are also classified correctly. The model achieved an accuracy of 76.36%, demonstrating that passenger characteristics can be used to predict survival outcomes with reasonable reliability.
+
+## 7.6 Confusion Matrix Heatmap
+
+```{r confusion_heatmap, fig.height=5, fig.width=6}
+# visualize actual and predicted survival outcomes using a confusion matrix heatmap
+conf_df <- as.data.frame(
+  table(
+    Actual = test_data$Survived,
+    Predicted = pred_class
+  )
+)
+
+ggplot(conf_df,
+       aes(x = Actual,
+           y = Predicted,
+           fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq),
+            color = "white",
+            size = 5) +
+  labs(
+    title = "Confusion Matrix Heatmap",
+    x = "Actual Survival",
+    y = "Predicted Survival"
+  ) +
+  theme_minimal()
+```
+
+## 7.7 Predicted Survival Probability by Passenger Class
+
+```{r class_probability}
+# compare the distribution of predicted survival probabilities among different passenger classes
+
+Titanic_expanded$Predicted_Prob <- predict(
+  titanic_model,
+  newdata = Titanic_expanded,
+  type = "response"
+)
+
+ggplot(
+  Titanic_expanded,
+  aes(Class, Predicted_Prob, fill = Class)
+) +
+  geom_boxplot() +
+  scale_fill_manual(
+    values = c(
+      "1st"  = "steelblue3",
+      "2nd"  = "lightskyblue",
+      "3rd"  = "firebrick3",
+      "Crew" = "indianred2"
+    )
+  ) +
+  labs(
+    title = "Predicted Survival Probability by Passenger Class",
+    x = "Passenger Class",
+    y = "Predicted Survival Probability",
+    fill = "Class"
+  ) +
+  theme_minimal()
+```
+
+**Inference:** First-class passengers generally have the highest predicted probability of survival, while third-class passengers have substantially lower survival chances.
+
+## 7.8 Key Machine Learning Findings
+
+* Gender is one of the strongest predictors of survival.
+* Passenger class strongly influences survival probability.
+* Children tend to have better survival odds than adults.
+* Logistic Regression provides a meaningful framework for predicting survival using demographic characteristics.
+* The model demonstrates that survival patterns during the Titanic disaster were not random and can be explained using passenger attributes.
+
+## 7.9 Machine Learning Insights
+
+The Logistic Regression model successfully predicted passenger survival using a limited set of variables. The model confirmed that gender, passenger class, and age were among the most influential factors affecting survival outcomes. The classification performance demonstrates that survival during the Titanic disaster was strongly associated with passenger characteristics rather than random chance.
+
+The predictive analysis complements the exploratory findings and illustrates how machine learning techniques can be used to uncover meaningful patterns in historical datasets.
+
+
+
+# 8. Key Takeaways
+
+1. **Passenger class mattered.** Higher-class passengers generally had better chances of survival.
+2. **Sex mattered strongly.** Female passengers had a clear survival advantage.
+3. **Age also mattered.** Children tended to fare better than adults.
+4. **The disaster was not random.** Survival was shaped by a combination of social position, physical location, and evacuation priority.
+
+# 9. Conclusion
+
+This report explored the Titanic disaster through the lens of data analysis. Survival was not evenly distributed. Instead, it depended on class, sex, and age. The machine learning model achieved an accuracy of 76.36%, demonstrating that passenger characteristics can be used to predict survival outcomes with reasonable reliability.
+
+In conclusion, the Titanic is not just a historical event, it is also a strong example of how data can reveal patterns behind one of history’s most famous tragedies.
